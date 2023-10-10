@@ -1,0 +1,2 @@
+# statuscollector
+status collection modules
