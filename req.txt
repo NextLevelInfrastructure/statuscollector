@@ -1,0 +1,8 @@
+# pip requirements file for statuscollector
+#
+# pip install -r req.txt
+
+PyYAML
+prometheus-api-client
+prometheus_client
+requests
