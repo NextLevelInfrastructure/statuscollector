@@ -1,9 +1,12 @@
 #!/usr/bin/python3
 
-import datetime, yaml
+import datetime, logging, yaml
 
 from uisp import UispClient, Organizations, ServiceStatus, print_all_clients, currency_str
 from observium import ObserviumClient
+
+
+LOGGER = logging.getLogger('statuscollector.uisp')
 
 
 class IdMapper:
@@ -22,10 +25,24 @@ def main(argv):
     config = yaml.safe_load(open(argv[1]))
     organizations = Organizations(config)
     uisp = UispClient(config)
+    observium = ObserviumClient(config)
+    devices = observium.get_devices()
+    print('reading observium', end='', flush=True)
+    id2owner = { devid: devices[devid]['sysName'].split('.')[1] for devid in devices.keys() if '.' in devices[devid]['sysName'] }
+    owner2devids = { owner: [] for owner in organizations.owners }
+    id2custports = {}
+    for devid in id2owner.keys():
+        if id2owner[devid] in organizations.owners:
+            print('.', end='', flush=True)
+            # ifSpeed is also available here
+            id2custports[devid] = [p for p in observium.get_ports(devid).values() if p['ifAlias'] and p['ifAlias'].startswith('Cust: ') and p['ifAlias'] != 'Cust: UNASSIGNED' and not p['ifAlias'].startswith('Cust: test') and p['ifAdminStatus'] == 'up']
+            owner2devids[id2owner[devid]].append(devid)
+    print(f'. {len(id2custports)} access devices of {len(id2owner)} total')
 
     overall_receivable, overall_credit = 0, 0
     orgs = uisp.get_organizations()
     for org in orgs:
+        owner = None
         clients = uisp.get_clients_of(org)
         active_clients = [c for c in clients if c['isActive'] and not c['isArchived'] and not c['isLead']]
         archived_clients = [c for c in clients if c['isArchived']]
@@ -57,10 +74,11 @@ def main(argv):
         nli_capitated_connectivity = 0
         revenue_after_nli_capitated = 0
         values = {}
+        observium_devids = []
         for (spid, services) in this_month.idmap.items():
             for s in services:
                 organizations.register_service(s)
-            owner = organizations.get_owner(spid)
+            owner = owner or organizations.get_owner(spid)
             values = values or owner.values
             nli_capitated_nonconnectivity += owner.total_capitated_to_nli()
             nli_capitated_connectivity += owner.total_capitated_connectivity()
@@ -69,7 +87,9 @@ def main(argv):
             nli100 = '' if owner.values else f' 100% NLI' 
             dls = services[0]['downloadSpeed']
             speed = f' {int(dls)} Mbps' if dls else ''
-            print(f'\n=== {services[0]["name"]}({spid}){speed} has {owner.active_services} actives{warning}{nli100}')
+            observium_devids = owner2devids[owner.owner] if owner.owner else []
+            accessdevices = f' and {len(custs_up)} subscriber ports on {len(observium_devids)} access devices' if owner.owner else ''
+            print(f'\n=== {services[0]["name"]}({spid}){speed} has {owner.active_services} actives{warning}{nli100}{accessdevices}')
             cids = { s['clientId'] for s in services  }
             cids_with_service |= cids
             cids_with_new_service = { s['clientId'] for s in services if s['activeFrom'] >= today.isoformat()[0:8] }
@@ -88,6 +108,19 @@ def main(argv):
                 print(f'**** {uisp.name_of(c)} no longer has service')
             if c['id'] in cids_with_service and not c['username']:
                 LOGGER.warning(f'**** WARNING: client has no username: {uisp.name_of(c)}')
+
+        custs_up = { cust['ifAlias'][6:].partition(' ')[0] for devid in observium_devids for cust in id2custports[devid] if cust['ifAlias'] != 'Cust: technician' }
+
+        custs_with_service = set()
+        for c in clients:
+            if c['id'] in cids_with_service:
+                custname = (c['lastName'] or c['companyContactLastName']).split(' ')[0]
+                custs_with_service.add(custname)
+                if custname not in custs_up:
+                    LOGGER.warning(f'**** WARNING: client has service in UISP but no switchport: {uisp.name_of(c)}')
+        custs_unbilled = custs_up - custs_with_service
+        if custs_unbilled:
+            LOGGER.warning(f'**** WARNING: clients with switchport but not billing in UISP: {", ".join(custs_unbilled)}')
 
         fmp = values.get('fixed_monthly_payouts', [])
         fmpstr = (', ' + ', '.join(f'{p[0]} {currency_str(p[1])}' for p in fmp)) if fmp else ''

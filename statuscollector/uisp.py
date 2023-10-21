@@ -76,6 +76,7 @@ class ServicePlan:
 class Organizations:
     def __init__(self, config):
         self.config = config.get('organizations', {})
+        self.owners = { k for k in self.config.keys() }
         self.spid2owner = {}
         for owner, d in self.config.items():
             for spid in (d['billing_instructions'] or {}).keys():
@@ -90,6 +91,8 @@ class Organizations:
         spid = service['servicePlanId']
         owner = self.spid2owner.get(spid)
         if not owner:
+            # Then this spid was not present in the config file, so
+            # all funds are allocaated to NLI.
             owner = NoServicePlan(spid)
             self.spid2owner[spid] = owner
         owner.active_services += 1

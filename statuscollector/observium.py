@@ -29,9 +29,9 @@ class ObserviumClient:
         if not password:
             raise ObserviumClientError('no password in observium config')
         self.basicauth = requests.auth.HTTPBasicAuth(username, password)
-        self.devices_querystring = self.config.get('devices_querystring')
-        if not self.devices_querystring:
-            raise ObserviumClientError('no devices_querystring in observium config')
+        self.devices_querystrings = self.config.get('devices_querystrings')
+        if not self.devices_querystrings:
+            raise ObserviumClientError('no devices_querystrings in observium config')
         self.timeout = self.config.get('timeout', 10)
 
     @REQUEST_TIME.time()
@@ -50,7 +50,19 @@ class ObserviumClient:
         return resp.json()
 
     def get_devices(self):
-        return self.bearer_json_request(requests.get, f'/devices/?{self.devices_querystring}')
+        devs = {}
+        for qstring in self.devices_querystrings:
+            devices = self.bearer_json_request(requests.get, f'/devices/?{qstring}')
+            status = devices['status']
+            if status != 'ok':
+                raise ObserviumClientError(f'server returned status {status}', devices)
+            for k, v in devices['devices'].items():
+                devs[k] = v
+        return devs
 
     def get_ports(self, devicenum):
-        return self.bearer_json_request(requests.get, f'/ports/?device_id={devicenum}&fields=ifAlias,ifSpeed,ifAdminStatus')
+        ports = self.bearer_json_request(requests.get, f'/ports/?device_id={devicenum}&fields=ifAlias,ifSpeed,ifAdminStatus')
+        status = ports['status']
+        if status != 'ok':
+            raise ObserviumClientError(f'server returned status {status}', ports)
+        return ports['ports'] or {}
