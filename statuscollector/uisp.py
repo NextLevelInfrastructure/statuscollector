@@ -145,31 +145,36 @@ class UispClient:
         b = client['accountBalance']
         name = self.name_of(client)
         balance = f' owes {currency_str(-b)}' if b < 0 else f' credit {currency_str(b)}' if b > 0 else ''
-        active = '' if client['isActive'] else ' INACTIVE'
+        active = '' ### if client['isActive'] else ' INACTIVE'
         autopay = '' if client['hasAutopayCreditCard'] else ' NO-AUTOPAY'
-        overdue = ' OVERDUE' if client['hasOverdueInvoice'] else ''
+        pastdue = ' PAST-DUE' if client['hasOverdueInvoice'] else ''
         suspended = ' SUSPENDED' if client['hasSuspendedService'] else ''
         lead = ' LEAD' if client['isLead'] else ''
-        invite = '' if client['invitationEmailSentDate'] else ' no-invite'
-        return f'{client["username"]} {name}{balance}{autopay}{overdue}{active}{lead}{suspended}{invite}'
+        invite = '' ### if client['invitationEmailSentDate'] else ' no-invite'
+        return f'{client["username"]} {name}{balance}{autopay}{pastdue}{active}{lead}{suspended}{invite}'
 
 
-def print_all_clients(clients, uisp, cids_with_new_service=set()):
-    active_clients = [c for c in clients if c['isActive'] and not c['isArchived'] and not c['isLead']]
-    inactive_clients = [c for c in clients if not c['isActive'] and not c['isArchived'] and not c['isLead']]
-    for client in clients:
+def print_clients(clients, uisp, cids_with_new_service=set(), only=[]):
+    ## active_clients = [c for c in clients if c['isActive'] and not c['isArchived'] and not c['isLead']]
+    def matching(client):
+        matches = 0
+        if 'PAST-DUE' in only and client['hasOverdueInvoice']:
+            matches += 1
+        if 'NO-AUTOPAY' in only and not client['hasAutopayCreditCard']:
+            matches += 1
+        if 'INACTIVE' in only and not client['isActive']:
+            matches += 1
+        return matches == len(only)
+    matching_clients = [c for c in clients if matching(c) and not c['isArchived'] and not c['isLead']]
+    for client in matching_clients:
         newservice = 'NEWSERVICE' if client['id'] in cids_with_new_service else ''
         if client['accountBalance'] > 0:
             print(uisp.printable_client(client), newservice)
-    for client in clients:
+    for client in matching_clients:
         newservice = 'NEWSERVICE' if client['id'] in cids_with_new_service else ''
         if client['accountBalance'] < 0:
             print(uisp.printable_client(client), newservice)
-    for client in active_clients:
-        newservice = 'NEWSERVICE' if client['id'] in cids_with_new_service else ''
-        if not client['accountBalance']:
-            print(uisp.printable_client(client), newservice)
-    for client in inactive_clients:
+    for client in matching_clients:
         newservice = 'NEWSERVICE' if client['id'] in cids_with_new_service else ''
         if not client['accountBalance']:
             print(uisp.printable_client(client), newservice)

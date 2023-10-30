@@ -2,7 +2,7 @@
 
 import datetime, logging, yaml
 
-from uisp import UispClient, Organizations, ServiceStatus, print_all_clients, currency_str
+from uisp import UispClient, Organizations, ServiceStatus, print_clients, currency_str
 from observium import ObserviumClient
 
 
@@ -22,6 +22,9 @@ class IdMapper:
 
 
 def main(argv):
+    onlyclients = (['PAST-DUE'] if '--pastdue' in argv else []) + (['NO-AUTOPAY'] if '--noautopay' in argv else []) + (['INACTIVE'] if '--inactive' in argv else [])
+    argv = argv[0:1] + argv[1+len(onlyclients):]
+    assert len(argv) == 2, (onlyclients, argv)
     config = yaml.safe_load(open(argv[1]))
     organizations = Organizations(config)
     uisp = UispClient(config)
@@ -88,16 +91,16 @@ def main(argv):
             dls = services[0]['downloadSpeed']
             speed = f' {int(dls)} Mbps' if dls else ''
             observium_devids = owner2devids[owner.owner] if owner.owner else []
-            accessdevices = f' and {len(custs_up)} subscriber ports on {len(observium_devids)} access devices' if owner.owner else ''
+            accessdevices = f' on {len(observium_devids)} access devices' if owner.owner else ''
             print(f'\n=== {services[0]["name"]}({spid}){speed} has {owner.active_services} actives{warning}{nli100}{accessdevices}')
-            cids = { s['clientId'] for s in services  }
+            cids = { s['clientId'] for s in services if s['servicePlanType'] != 'General' }
             cids_with_service |= cids
             cids_with_new_service = { s['clientId'] for s in services if s['activeFrom'] >= today.isoformat()[0:8] }
 
             # ordinarily we print only clients who have service. if you also
             # want to print clients without service, uncomment the next line.
-            #print_all_clients(clients, uisp, cids_with_new_service)
-            print_all_clients([clientmap.idmap[cid][0] for cid in cids], uisp, cids_with_new_service)
+            #print_clients(clients, uisp, cids_with_new_service)
+            print_clients([clientmap.idmap[cid][0] for cid in cids], uisp, cids_with_new_service, only=onlyclients)
 
         # A client was dropped from previous month to current month if that
         # client is in previous month drops but not in current month actives.
@@ -109,18 +112,18 @@ def main(argv):
             if c['id'] in cids_with_service and not c['username']:
                 LOGGER.warning(f'**** WARNING: client has no username: {uisp.name_of(c)}')
 
-        custs_up = { cust['ifAlias'][6:].partition(' ')[0] for devid in observium_devids for cust in id2custports[devid] if cust['ifAlias'] != 'Cust: technician' }
+        custs_up = { cust['ifAlias'][6:].partition(' ')[0] for devid in observium_devids for cust in id2custports[devid] if not cust['ifAlias'].startswith('Cust: technician') }
 
         custs_with_service = set()
         for c in clients:
             if c['id'] in cids_with_service:
-                custname = (c['lastName'] or c['companyContactLastName']).split(' ')[0]
+                custname = (c['lastName'] or c['companyName'] or c['companyContactLastName'] or '').split(' ')[0]
                 custs_with_service.add(custname)
                 if custname not in custs_up:
                     LOGGER.warning(f'**** WARNING: client has service in UISP but no switchport: {uisp.name_of(c)}')
         custs_unbilled = custs_up - custs_with_service
         if custs_unbilled:
-            LOGGER.warning(f'**** WARNING: clients with switchport but not billing in UISP: {", ".join(custs_unbilled)}')
+            LOGGER.warning(f'**** WARNING: of {len(custs_up)} subscriber switchports, these are not billing in UISP: {", ".join(custs_unbilled)}')
 
         fmp = values.get('fixed_monthly_payouts', [])
         fmpstr = (', ' + ', '.join(f'{p[0]} {currency_str(p[1])}' for p in fmp)) if fmp else ''
@@ -134,5 +137,4 @@ def main(argv):
 
 if __name__ == '__main__':
     import sys
-    assert len(sys.argv) == 2, sys.argv
     sys.exit(main(sys.argv))
