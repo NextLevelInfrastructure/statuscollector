@@ -6,7 +6,7 @@ from uisp import UispClient, Organizations, ServiceStatus, print_clients, curren
 from observium import ObserviumClient
 
 
-LOGGER = logging.getLogger('statuscollector.uisp')
+LOGGER = logging.getLogger('statuscollector.main')
 
 
 class IdMapper:
@@ -45,7 +45,7 @@ def main(argv):
     overall_receivable, overall_credit = 0, 0
     orgs = uisp.get_organizations()
     for org in orgs:
-        owner = None
+        wrapper = None
         clients = uisp.get_clients_of(org)
         active_clients = [c for c in clients if c['isActive'] and not c['isArchived'] and not c['isLead']]
         archived_clients = [c for c in clients if c['isArchived']]
@@ -81,18 +81,18 @@ def main(argv):
         for (spid, services) in this_month.idmap.items():
             for s in services:
                 organizations.register_service(s)
-            owner = owner or organizations.get_owner(spid)
-            values = values or owner.values
-            nli_capitated_nonconnectivity += owner.total_capitated_to_nli()
-            nli_capitated_connectivity += owner.total_capitated_connectivity()
-            revenue_after_nli_capitated += owner.remainder_after_nli_capitation()
-            warning = f' (WARNING less than target {owner.target_actives})' if owner.target_actives > owner.active_services else f' (target {owner.target_actives})'
-            nli100 = '' if owner.values else f' 100% NLI' 
+            wrapper = wrapper or organizations.get_wrapper(spid)
+            values = values or wrapper.values
+            nli_capitated_nonconnectivity += wrapper.total_capitated_to_nli()
+            nli_capitated_connectivity += wrapper.total_capitated_connectivity()
+            revenue_after_nli_capitated += wrapper.remainder_after_nli_capitation()
+            warning = f' (WARNING less than target {wrapper.target_actives})' if wrapper.target_actives > wrapper.active_services else f' (target {wrapper.target_actives})'
+            nli100 = '' if wrapper.values else f' 100% NLI'
             dls = services[0]['downloadSpeed']
             speed = f' {int(dls)} Mbps' if dls else ''
-            observium_devids = owner2devids[owner.owner] if owner.owner else []
-            accessdevices = f' on {len(observium_devids)} access devices' if owner.owner else ''
-            print(f'\n=== {services[0]["name"]}({spid}){speed} has {owner.active_services} actives{warning}{nli100}{accessdevices}')
+            observium_devids = owner2devids[wrapper.owner] if wrapper.owner else []
+            accessdevices = f' on {len(observium_devids)} access devices' if wrapper.owner else ''
+            print(f'\n=== {services[0]["name"]}({spid}){speed} has {wrapper.active_services} actives{warning}{nli100}{accessdevices}')
             cids = { s['clientId'] for s in services if s['servicePlanType'] != 'General' }
             cids_with_service |= cids
             cids_with_new_service = { s['clientId'] for s in services if s['activeFrom'] >= today.isoformat()[0:8] }

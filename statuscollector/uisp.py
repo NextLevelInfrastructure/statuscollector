@@ -30,7 +30,20 @@ class ServiceStatus(Enum):
     INACTIVE  = 8
 
 
-class NoServicePlan:
+class InvoiceStatus(Enum):
+    DRAFT     = 0
+    UNPAID    = 1
+    PARTIALLY_PAID = 2
+    PAID      = 3
+    VOID      = 4
+    PROCESSED_PROFORMA = 5
+
+    @classmethod
+    def may_be_paid(cls, status):
+        return status == InvoiceStatus.UNPAID.value or status == InvoiceStatus.PARTIALLY_PAID.value or status == InvoiceStatus.PAID.value
+
+
+class NoServicePlanWrapper:
     def __init__(self, spid):
         self.owner, self.spid, self.values = None, spid, {}
         self.active_services = 0
@@ -47,12 +60,12 @@ class NoServicePlan:
         return 0
 
 
-class ServicePlan:
+class ServicePlanWrapper:
     DEFAULT_BILLING_RATE = 0.03
 
     def __init__(self, owner, spid, values):
         self.owner, self.spid, self.values = owner, spid, values
-        self.active_services = 0
+        self.active_services = 0  # only Internet service types, not General
         self.total_price = 0
         bi = values['billing_instructions'][spid]
         self.target_actives = bi['subscriber_target']
@@ -77,26 +90,28 @@ class Organizations:
     def __init__(self, config):
         self.config = config.get('organizations', {})
         self.owners = { k for k in self.config.keys() }
-        self.spid2owner = {}
+        self.spid2wrapper = {}
         for owner, d in self.config.items():
             for spid in (d['billing_instructions'] or {}).keys():
-                self.spid2owner[spid] = ServicePlan(owner, spid, d)
+                self.spid2wrapper[spid] = ServicePlanWrapper(owner, spid, d)
 
-    def get_owner(self, spid):
-        return self.spid2owner.get(spid)
+    def get_wrapper(self, spid):
+        return self.spid2wrapper.get(spid)
 
     def register_service(self, service):
         if service['status'] != ServiceStatus.ACTIVE.value:
             return
         spid = service['servicePlanId']
-        owner = self.spid2owner.get(spid)
-        if not owner:
+        wrapper = self.spid2wrapper.get(spid)
+        if not wrapper:
             # Then this spid was not present in the config file, so
             # all funds are allocaated to NLI.
-            owner = NoServicePlan(spid)
-            self.spid2owner[spid] = owner
-        owner.active_services += 1
-        owner.total_price += service['price']
+            wrapper = NoServicePlanWrapper(spid)
+            self.spid2wrapper[spid] = wrapper
+        if service['servicePlanType'] != 'General':
+            wrapper.active_services += 1
+        wrapper.total_price += service['price']
+
 
 def currency_str(v):
     vv = round(v, 2)
@@ -137,6 +152,16 @@ class UispClient:
 
     def get_services_of(self, organization):
         return self.bearer_json_request(requests.get, f'/clients/services?organizationId={organization["id"]}')
+
+    def get_invoices_of(self, organization, startdate='', enddate=''):
+        cdf = f'&createdDateFrom={startdate}' if startdate else ''
+        cdt = f'&createdDateTo={enddate}' if enddate else ''
+        return self.bearer_json_request(requests.get, f'/clients/invoices?organizationId={organization["id"]}{cdf}{cdt}')
+
+    def get_payments(self, startdate, enddate=''):
+        cdf = f'&createdDateFrom={startdate}'
+        cdt = f'&createdDateTo={enddate}' if enddate else ''
+        return self.bearer_json_request(requests.get, f'/clients/payments?order=createdDate{cdf}{cdt}')
 
     def name_of(self, client):
         return f'{client["firstName"]} {client["lastName"]}' if client['firstName'] else f'COMPANY:{client["companyName"]}, {client["companyContactFirstName"]} {client["companyContactLastName"]}' if client['companyContactFirstName'] else f'COMPANY:{client["companyName"]}' if client['companyName'] else str(client)
