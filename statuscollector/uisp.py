@@ -71,6 +71,7 @@ class ServicePlanWrapper:
         self.target_actives = bi['subscriber_target']
         self.management_per_service = bi['nli_management']
         self.isp_per_service = bi['nli_isp']
+        self.monthly_connectivity_weight = bi.get('nli_monthly_connectivity_weight', 1)
         self.connectivity_per_service = bi['nli_capitated_connectivity']
         self.billing_fee = bi.get('nli_billing_fee')
 
@@ -100,7 +101,7 @@ class Organizations:
 
     def register_service(self, service):
         if service['status'] != ServiceStatus.ACTIVE.value:
-            return
+            return None
         spid = service['servicePlanId']
         wrapper = self.spid2wrapper.get(spid)
         if not wrapper:
@@ -111,6 +112,7 @@ class Organizations:
         if service['servicePlanType'] != 'General':
             wrapper.active_services += 1
         wrapper.total_price += service['price']
+        return wrapper
 
 
 def currency_str(v):
@@ -156,12 +158,21 @@ class UispClient:
     def get_invoices_of(self, organization, startdate='', enddate=''):
         cdf = f'&createdDateFrom={startdate}' if startdate else ''
         cdt = f'&createdDateTo={enddate}' if enddate else ''
-        return self.bearer_json_request(requests.get, f'/clients/invoices?organizationId={organization["id"]}{cdf}{cdt}')
+        return self.bearer_json_request(requests.get, f'/invoices?organizationId={organization["id"]}{cdf}{cdt}')
 
     def get_payments(self, startdate, enddate=''):
         cdf = f'&createdDateFrom={startdate}'
         cdt = f'&createdDateTo={enddate}' if enddate else ''
-        return self.bearer_json_request(requests.get, f'/clients/payments?order=createdDate{cdf}{cdt}')
+        return self.bearer_json_request(requests.get, f'/payments?order=createdDate{cdf}{cdt}')
+
+    def get_custom_attributes(self):
+        return self.bearer_json_request(requests.get, '/custom-attributes')
+
+    def patch_invoice_attribute(self, invoiceid, aid, value):
+        return self.bearer_json_request(requests.patch, f'/invoices/{invoiceid}?attributes%5B0%5D%5BcustomAttributeId%5D={aid}&attributes%5B0%5D%5Bvalue%5D={value}')
+
+    def patch_payment_attribute(self, paymentid, aid, value):
+        return self.bearer_json_request(requests.patch, f'/payments/{paymentid}?attributes%5B0%5D%5BcustomAttributeId%5D={aid}&attributes%5B0%5D%5Bvalue%5D={value}')
 
     def name_of(self, client):
         return f'{client["firstName"]} {client["lastName"]}' if client['firstName'] else f'COMPANY:{client["companyName"]}, {client["companyContactFirstName"]} {client["companyContactLastName"]}' if client['companyContactFirstName'] else f'COMPANY:{client["companyName"]}' if client['companyName'] else str(client)
