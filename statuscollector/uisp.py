@@ -18,6 +18,23 @@ class UispClientError(Exception):
     pass
 
 
+class ClientStatus(Enum):
+    INACTIVE = 0
+    ACTIVE = 1
+    SUSPENDED = 2
+    LEAD = 3
+
+    @staticmethod
+    def from_client(c):
+        if c['isLead']:
+            return ClientStatus.LEAD
+        if c['hasSuspendedService']:
+            return ClientStatus.SUSPENDED
+        if c['isActive']:
+            return ClientStatus.ACTIVE
+        return ClientStatus.INACTIVE
+
+
 class ServiceStatus(Enum):
     PREPARED  = 0
     ACTIVE    = 1
@@ -148,6 +165,9 @@ class UispClient:
 
     def get_organizations(self):
         return self.bearer_json_request(requests.get, f'/organizations')
+
+    def get_service_plans(self):
+        return self.bearer_json_request(requests.get, f'/service-plans')
 
     def get_clients_of(self, organization):
         return self.bearer_json_request(requests.get, f'/clients?organizationId={organization["id"]}')
