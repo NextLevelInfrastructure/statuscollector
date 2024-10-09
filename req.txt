@@ -3,6 +3,7 @@
 # pip install -r req.txt
 
 PyYAML
+boto3
 prometheus-api-client
 prometheus_client
 requests
