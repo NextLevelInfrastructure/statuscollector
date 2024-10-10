@@ -23,11 +23,14 @@ class ClientStatus(Enum):
     ACTIVE = 1
     SUSPENDED = 2
     LEAD = 3
+    ARCHIVED = 4
 
     @staticmethod
     def from_client(c):
         if c['isLead']:
             return ClientStatus.LEAD
+        if c['isArchived']:
+            return ClientStatus.ARCHIVED
         if c['hasSuspendedService']:
             return ClientStatus.SUSPENDED
         if c['isActive']:
