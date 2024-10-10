@@ -26,9 +26,9 @@ class ClientState(Enum):
 REQUEST_TIME = prometheus_client.Summary('uisp_net_request_seconds',
                                          'Time spent waiting for request')
 EMAIL_SUCCESS = prometheus_client.Gauge('uisp_email_success_count',
-                                        'number of emails sent successfully', ['org'])
+                                        'number of emails sent successfully', ['organization'])
 EMAIL_ERRORS = prometheus_client.Gauge('uisp_email_error_count',
-                                       'number of email sending errors', ['org'])
+                                       'number of email sending errors', ['organization'])
 
 
 class UispGauge:
@@ -117,6 +117,7 @@ class PrometheusWrapper:
             aws_access_key_id=self.config['ses']['access_key'],
             aws_secret_access_key=self.config['ses']['secret_key']
         )
+        self.id2allclients_map = {}
         self.id2client_map = {}
         self.id2service_map = {}
         self._maybe_refresh()
@@ -183,7 +184,7 @@ class PrometheusWrapper:
 
     def _send_email(self):
         # see https://codelovingyogi.medium.com/sending-emails-using-aws-simple-email-service-ses-220de9db4fc8
-        for (name, d) in self.config['organizations']:
+        for (name, d) in self.config['organizations'].items():
             report_to = d.get('pastdue_report_to')
             if report_to:
                 if isinstance(report_to, list):
@@ -192,11 +193,52 @@ class PrometheusWrapper:
                     dests = [report_to]
                 else:
                     assert False, f'pastdue_report_to { report_to } for { name } has bad type'
-                dests = ['dulitz@gmail.com'] ### FIXME
-                body = f"""Hello { name } folks,
+                clients = []
+                # this could be made more efficient
+                for service in self.id2service_map.values():
+                    if service['servicePlanId'] in d['billing_instructions'] and service['status'] == ServiceStatus.ACTIVE.value:
+                        orgid = self.id2allclients_map[service['clientId']]['organizationId']
+                        clients = [c for c in self.id2allclients_map.values() if c['organizationId'] == orgid]
+                        break
+                assert clients, d
+                active = [client for client in clients if ClientStatus.from_client(client) == ClientStatus.ACTIVE and not client['isArchived']]
+                nonarchived = [client for client in clients if not client['isArchived']]
+                pastdue = [client for client in nonarchived if client['hasOverdueInvoice']]
+                noautopay = [client for client in active if not client['hasAutopayCreditCard']]
+                lineend = '\n   '
+                def _printable(client):
+                    return self.uisp.printable_client(client)
+                if pastdue:
+                    subject = f'NLI summary: {len(pastdue)} past due subscribers for { name }'
+                    body = f"""Hello { name } folks,
 
-This is your periodic summary of FIXME!!!
+This is your periodic subscriber summary from Next Level Infrastructure.
+
+You have {len(active)} active subscribers in our billing database, of which {len(noautopay)} are not on autopay.
+
+You have {len(pastdue)} subscribers (active and inactive) with an overdue invoice. They are:
+   {lineend.join([_printable(p) for p in pastdue])}
+
+Please bug them.
+
+FYI, the active subscribers who do not have a valid autopay credit card set up are:
+   {lineend.join([_printable(p) for p in noautopay])}
 """
+                else:
+                    subject = f'NLI summary: no past due subscribers for { name }!'
+                    body = f"""Hello { name } folks,
+
+This is your periodic subscriber summary from Next Level Infrastructure.
+
+Congratulations for having no past due subscribers! Y'all rock!
+
+You have {len(active)} active subscribers in our billing database, of which
+{len(noautopay)} are not on autopay.
+
+FYI, the active subscribers who do not have a valid autopay credit card set up are:
+   {lineend.join([_printable(p) for p in noautopay])}
+"""
+                LOGGER.info('preparing to send email')
                 response = self.awsclient.send_email(
                     Destination={ 'ToAddresses': dests },
                     Message={
@@ -208,7 +250,7 @@ This is your periodic summary of FIXME!!!
                         },
                         'Subject': {
                             'Charset': 'UTF-8',
-                            'Data': f'Next Level Infrastructure subscriber summary for { name }',
+                            'Data': subject,
                         },
                     },
                     Source='support@nextlevel.net'
@@ -228,6 +270,7 @@ This is your periodic summary of FIXME!!!
             orgid = org['id']
             clients = self.uisp.get_clients_of(org)
             self.id2client_map = { c['id']: c for c in clients }
+            self.id2allclients_map.update(self.id2client_map)
             services = self.uisp.get_services_of(org)
             for s in services:
                 self.id2service_map[s['id']] = dict(s, userIdent=self.id2client_map.get(s['clientId'], { 'userIdent': -1 })['userIdent'], downloadSpeed=self.serviceplans[s['servicePlanId']].get('downloadSpeed', -1), uploadSpeed=self.serviceplans[s['servicePlanId']].get('uploadSpeed', -1))
@@ -244,7 +287,7 @@ def main(args):
     )
     parser.add_argument('config', type=str, help='yaml configuration file')
     parser.add_argument('--port', type=int, default=0, help='TCP port on which to serve prometheus /metrics')
-    parser.add_argument('--emailday', type=int, default=-1, help='UTC day of week on which to send summary email (-1=none, 0=Sunday)')
+    parser.add_argument('--emailday', type=int, default=-1, help='UTC day of week on which to send summary email (-1=none, 0=Monday)')
     parser.add_argument('--emailhour', type=int, default=14, help='UTC hour in day to send summary email')
     vals = parser.parse_args(args=args[1:])
 
@@ -254,6 +297,10 @@ def main(args):
     config = yaml.safe_load(open(vals.config))
 
     if vals.port:
+        if vals.emailday < 0 or vals.emailday > 6:
+            LOGGER.info('--emailday does not specify a valid day: no weekly summary email will be sent')
+        else:
+            LOGGER.info('will send weekly email subscriber summaries')
         wrapper = PrometheusWrapper(config, vals.emailday, vals.emailhour)
         LOGGER.info(f'serving metrics on port {vals.port}')
         prometheus_client.start_http_server(vals.port)
