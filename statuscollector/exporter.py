@@ -6,7 +6,7 @@ from collections import namedtuple
 from datetime import datetime
 from enum import Enum
 
-import botocore, boto3, prometheus_client
+import botocore, boto3, prometheus_client, requests.exceptions
 
 from uisp import UispClient, Organizations, ClientStatus, ServiceStatus
 
@@ -91,7 +91,6 @@ class UispClientGauge:
 
 class PrometheusWrapper:
     """
-    **** uisp_client_contact{id="1", contactId="1", email="", phone="", name="", type="Billing"} = ClientState
     uisp_service_status{id="1", serviceId="10", status="ACTIVE", ...} = ServiceStatus
     uisp_service_price{id="1", serviceId="10", status="ACTIVE"} = price
     uisp_service_from_date{id="1", serviceId="10"} = activeFrom
@@ -103,18 +102,9 @@ class PrometheusWrapper:
     """
     MIN_UPDATE_INTERVAL = 60 * 60  # seconds
                             
-    SERVICE_PROPERTIES = [
-        # 'clientId' is renamed 'id'
-        # 'id' is renamed 'serviceId'
-        # 'status', 'activeFrom', 'activeTo',
-        # 'contractEndDate', 'lastInvoicedDate'
-        'prepaid', 'addressGpsLat', 'addressGpsLon', 'servicePlanId',
-        'hasIndividualPrice',
-        ]
     SERVICEPLAN_PROPERTIES = [
-        # 'id' is renamed 'servicePlanId'
         # 'singleprice'
-        'name', 'downloadSpeed', 'uploadSpeed', 'organizationId', 'taxable',
+        'id', 'name', 'downloadSpeed', 'uploadSpeed', 'organizationId', 'taxable',
         'archived', 'servicePlanType',
         ]
 
@@ -160,14 +150,33 @@ class PrometheusWrapper:
         self.clientautopay_g = UispClientGauge('uisp_client_autopay', 'UISP client has autopay enabled', ['id'], _clientmodel, lambda d: d['hasAutopayCreditCard'])
         self.clientinvited_g = UispClientGauge('uisp_client_invited_ts', 'UISP client invitation timestamp', ['id'], _clientmodel, lambda d: d['invitationEmailSentDate'])
         self.clientregistered_g = UispClientGauge('uisp_client_registered_ts', 'UISP client registration timestamp', ['id'], _clientmodel, lambda d: d['registrationDate'])
+
+        servicelabels = [
+            'id', 'clientId', 'prepaid', 'addressGpsLat', 'addressGpsLon',
+            'servicePlanId', 'hasIndividualPrice',
+            'downloadSpeed', 'uploadSpeed'
+        ]
+        def _servicemodel():
+            self._maybe_refresh()
+            return self.id2service_map
+        self.servicestate_g = UispClientGauge('uisp_service_state', 'UISP service state', servicelabels, _servicemodel, lambda d: d['status'])
+        self.serviceactivefrom_g = UispClientGauge('uisp_service_active_from_ts', 'UISP service start timestamp', ['id', 'clientId'], _servicemodel, lambda d: d['activeFrom'])
+        self.serviceactiveto_g = UispClientGauge('uisp_service_active_to_ts', 'UISP service end timestamp, 0=ongoing', ['id', 'clientId'], _servicemodel, lambda d: d['activeTo'])
+        self.servicecontractend_g = UispClientGauge('uisp_service_contract_end_ts', 'UISP service contract end timestamp, 0=no contract', ['id', 'clientId'], _servicemodel, lambda d: d['contractEndDate'])
+        self.serviceinvoiced_g = UispClientGauge('uisp_service_last_invoiced_ts', 'UISP service contract last invoiced timestamp, 0=never invoiced', ['id', 'clientId'], _servicemodel, lambda d: d['lastInvoicedDate'])
+
         self.errors_g = prometheus_client.Gauge('uisp_errors', 'Number of errors')
         self.errors_g.set_function(lambda: self.errors)
 
     def _maybe_refresh(self):
         with self.lock:
             if time.time() - self.last_update > self.MIN_UPDATE_INTERVAL:
-                self._refresh()
-                self.last_update = time.time()
+                try:
+                    self._refresh()
+                    self.last_update = time.time()
+                except requests.exceptions.ReadTimeout:
+                    LOGGER.exception()
+                    self.errors += 1
         now = datetime.utcnow()
         if (self.emailday == now.weekday() and self.emailhour <= now.hour and
             time.time() - self.last_email > 3600*12):
@@ -219,17 +228,15 @@ This is your periodic summary of FIXME!!!
 
     @REQUEST_TIME.time()
     def _refresh(self):
-        self.serviceplans = self.uisp.get_service_plans()
+        self.serviceplans = { plan['id']: plan for plan in self.uisp.get_service_plans() }
         for org in self.uisporgs:
             LOGGER.info(f'refreshing UISP organization {org["name"]}')
             orgid = org['id']
             clients = self.uisp.get_clients_of(org)
-            for c in clients:
-                self.id2client_map[c['id']] = c
-            # active_clients = [c for c in clients if c['isActive'] and not c['isArchived'] and not c['isLead']]
+            self.id2client_map = { c['id']: c for c in clients }
             services = self.uisp.get_services_of(org)
             for s in services:
-                self.id2service_map[s['id']] = s
+                self.id2service_map[s['id']] = dict(s, userIdent=self.id2client_map.get(s['clientId'], { 'userIdent': -1 })['userIdent'], downloadSpeed=self.serviceplans[s['servicePlanId']].get('downloadSpeed', -1), uploadSpeed=self.serviceplans[s['servicePlanId']].get('uploadSpeed', -1))
 
 
 
