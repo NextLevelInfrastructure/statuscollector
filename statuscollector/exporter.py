@@ -102,12 +102,6 @@ class PrometheusWrapper:
     """
     MIN_UPDATE_INTERVAL = 60 * 60  # seconds
                             
-    SERVICEPLAN_PROPERTIES = [
-        # 'singleprice'
-        'id', 'name', 'downloadSpeed', 'uploadSpeed', 'organizationId', 'taxable',
-        'archived', 'servicePlanType',
-        ]
-
     def __init__(self, config, emailday, emailhour):
         self.config, self.emailday, self.emailhour = config, emailday, emailhour
         self.organizations = Organizations(self.config)
