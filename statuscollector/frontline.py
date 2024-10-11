@@ -164,11 +164,12 @@ def main(argv):
     assert len(argv) == 2, argv
     config = yaml.safe_load(open(argv[1]))
     fline = FrontlineClient(config)
-    nodes_by_cid = {}
+    nodes_by_lid = {}
     print('reading: ', end='')
-    for customer in fline.get_customers():
+    custs = fline.get_customers()
+    for customer in custs:
         for location in fline.get_locations_by_customerid(customer['id']):
-            nodes_by_cid[customer['id']] = fline.get_nodes_by_customerid(customer['id'], location['id'])
+            nodes_by_lid[location['id']] = fline.get_nodes_by_customerid(customer['id'], location['id'])
         print('.', end='', flush=True)
     print(' done')
     import pdb; pdb.set_trace()
