@@ -31,7 +31,46 @@ EMAIL_ERRORS = prometheus_client.Gauge('uisp_email_error_count',
                                        'number of email sending errors', ['organization'])
 
 
-class UispGauge:
+class EmailSender:
+    def __init__(self, config):
+        if 'ses' not in config:
+            LOGGER.warning('email sending inhibited because SES not in config')
+            self.awsclient = None
+        else:
+            self.awsclient = boto3.client(
+                'ses',
+                region_name=config['ses']['region'],
+                aws_access_key_id=config['ses']['access_key'],
+                aws_secret_access_key=config['ses']['secret_key']
+            )
+
+    def send(self, source, subject, body, to, cc=[]):
+        if not self.awsclient:
+            LOGGER.warning(f'not sending email to {",".join(to + cc)} because ses not present in config')
+            return
+        response = self.awsclient.send_email(
+            Destination = {
+                'ToAddresses': to,
+                'CcAddresses': cc
+            },
+            Message={
+                'Body': {
+                    'Text': {
+                        'Charset': 'UTF-8',
+                        'Data': body,
+                    },
+                },
+                'Subject': {
+                    'Charset': 'UTF-8',
+                    'Data': subject,
+                },
+            },
+            Source=source
+        )
+        return response
+
+
+class ModelGauge:
     def __init__(self, name, helptext, labelmap, idlabel, model, selector):
         """
         Model is a function of zero arguments that returns a map from id
@@ -86,7 +125,7 @@ class UispClientGauge:
                 # then it should be a date 2023-10-03T00:00:00-0700
                 return datetime.fromisoformat(v).timestamp()
             return v
-        self.gauge = UispGauge(metric, metric_desc, labelmap, 'id', model, _selector)
+        self.gauge = ModelGauge(metric, metric_desc, labelmap, 'id', model, _selector)
 
 
 class PrometheusWrapper:
@@ -111,12 +150,7 @@ class PrometheusWrapper:
         self.last_update, self.last_email = 0, 0
         self.errors = 0
         self.lock = threading.Lock()
-        self.awsclient = boto3.client(
-            'ses',
-            region_name=self.config['ses']['region'],
-            aws_access_key_id=self.config['ses']['access_key'],
-            aws_secret_access_key=self.config['ses']['secret_key']
-        )
+        self.emailer = EmailSender(self.config)
         self.id2allclients_map = {}
         self.id2client_map = {}
         self.id2service_map = {}
@@ -238,23 +272,13 @@ You have {len(active)} active subscribers in our billing database, of which
 FYI, the active subscribers who do not have a valid autopay credit card set up are:
    {lineend.join([_printable(p) for p in noautopay])}
 """
-                LOGGER.info('preparing to send email')
-                response = self.awsclient.send_email(
-                    Destination={ 'ToAddresses': dests },
-                    Message={
-                        'Body': {
-                            'Text': {
-                                'Charset': 'UTF-8',
-                                'Data': body,
-                            },
-                        },
-                        'Subject': {
-                            'Charset': 'UTF-8',
-                            'Data': subject,
-                        },
-                    },
-                    Source='support@nextlevel.net'
-                )
+                response = self.emailer.send(
+                    'support@nextlevel.net',
+                    subject,
+                    body,
+                    to=dests,
+                    cc=['accounting@nextlevel.net']
+                    )
                 if 'Error' in response:
                     EMAIL_ERRORS.labels(organization=name).inc()
                     LOGGER.error(f'failed to send email to { ", ".join(dests) }: { response["Error"] }')
