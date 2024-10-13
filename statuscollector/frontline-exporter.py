@@ -187,7 +187,15 @@ class PrometheusWrapper:
 
     @REQUEST_NODE_TIME.time()
     def _refresh_some_nodes(self):
+        def _upper(d, k):
+            v = d.get(k)
+            if v:
+                d[k] = v.upper()
         def _makedict(loc, node):
+            # sonic_stats uses uppercase MAC addresses so we should too,
+            # in order to join on them in Prometheus
+            _upper(node, 'mac')
+            _upper(node, 'ethernet1Mac')
             return dict(node, nlid=self.id2customer_map[loc['custid']]['accountId'], custid=loc['custid'], locid=loc['id'])
         if self.id2node_map:
             start = time.time()
