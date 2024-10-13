@@ -2,7 +2,9 @@
 """
 frontline.py
 
-Client for the Frontline API as documented in 
+Client for the Frontline API as documented in
+    https://partnersupport.plume.com/s/article/Plume-Portal-M2M-API-Credential-Generation
+
 """
 
 import json, logging, prometheus_client, requests, string, time, threading
@@ -54,6 +56,8 @@ class FrontlineClient:
 
     @REQUEST_TIME.time()
     def _bearer_jwt_request(self):
+        """POST to authurl with Authorization: header having value authtoken
+        in the body use authbody. Returns JWT expiring in 720 min"""
         LOGGER.info(f'presenting authtoken to refresh JWT')
         self.jwt_request_time = time.time()
         headers = { 'Authorization': self.authtoken }
@@ -93,6 +97,10 @@ class FrontlineClient:
 
     def get_nodes_by_customerid(self, customerid, locationid):
         return self.bearer_json_request(requests.get, f'/Customers/{customerid}/locations/{locationid}/nodes')['nodes']
+
+    # also worth looking at
+    # https://piranha-gamma.prod.us-west-2.aws.plumenet.io/api/Customers/642cc40d71d99d000a611549/locations/642cc40d71d99d000a61154b/appFacade/home?client_id=0oa16a2cw1IIfsm7N357
+    # returns nodes, devices, and statuses
 
     def get_nodes_by_customer(self, customer):
         """Returns a list of nodes, each with the following keys:
