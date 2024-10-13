@@ -99,13 +99,22 @@ class PrometheusWrapper:
         self.nodeparent_g = FrontlineGauge('frontline_node_parent_wifi_channel', '-1 iff link to parent node is not wifi', parentmap, _parentmodel, lambda d: -1 if d['leafToRoot'][0].get('medium', '') != 'wifi' else d['leafToRoot'][0].get('channel', -1))
         def _speedmodel():
             self._maybe_refresh()
-            return { node['id']: node for node in self.id2node_map.values() if node.get('speedTest') }
+            return { node['id']: dict(node['speedTest'], id=node['id'], nlid=node['nlid']) for node in self.id2node_map.values() if node.get('speedTest') }
         speedmap = { 'id': 'id', 'nlid': 'nlid' }
-        self.nodertt_g = FrontlineGauge('frontline_node_speedtest_rtt', 'RTT of speedtest', speedmap, _speedmodel, lambda d: -1 if d['speedTest']['status'] != 'succeeded' else d['speedTest']['rtt'])
-        self.nodeupload_g = FrontlineGauge('frontline_node_upload_mbps', 'Upload speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['speedTest']['status'] != 'succeeded' else d['speedTest']['upload'])
-        self.nodedownload_g = FrontlineGauge('frontline_node_download_mbps', 'Upload speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['speedTest']['status'] != 'succeeded' else d['speedTest']['download'])
+        self.nodertt_g = FrontlineGauge('frontline_node_speedtest_rtt', 'RTT of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['rtt'])
+        self.nodeupload_g = FrontlineGauge('frontline_node_upload_mbps', 'Upload speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['upload'])
+        self.nodedownload_g = FrontlineGauge('frontline_node_download_mbps', 'Download speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['download'])
+        speedmap.update({ k: k for k in ['trigger', 'gateway', 'serverIp', 'serverHost', 'serverId' ] })
+        self.nodespeedinfo_g = FrontlineGauge('frontline_node_speedtest_start_ts', 'Start time for most recent speedtest', speedmap, _speedmodel, lambda d: d['startedAt'])
 
-        # nodeid, nlid, speedTest['trigger'], 'gateway', 'serverIp', 'serverHost', 'serverId' has value speedTest['startedAt']
+        def _channelmodel():
+            self._maybe_refresh()
+            return { f'{node["id"]}-{stat["freqBand"]}': dict(node, id=f'{node["id"]}-{stat["freqBand"]}', nodeid=node['id'], freqBand=stat['freqBand'], channelWidth=stat['channelWidth'], numPunctured=len(stat['puncturedChannels']), nlichannel=(node['2gChannel'] if stat['freqBand'] == '2.4G' else node['5guChannel'] if stat['freqBand'] == '5GU' else node['5glChannel'] if stat['freqBand'] == '5GL' else -999)) for node in self.id2node_map.values() if 'radioStats' in node for stat in node.get('radioStats', []) }
+        channelmap = { k: k for k in ['nlid', 'freqBand', 'channelWidth'] }
+        channelmap['nodeid'] = 'id'
+        self.nodechannel_g = FrontlineGauge('frontline_node_channel', 'Channel in use for each frequency band', channelmap, _channelmodel, lambda d: d['nlichannel'])
+
+
         # frontline_node_channel: nodeid, nlid, radioStats['freqBand'], 'channelWidth', len('puncturedChannels') has value 2gChannel, 5guChannel, 5glChannel depending on freqBand
         # whether an alert is being shown
         # customers showing weirdness in number of optimization events.
