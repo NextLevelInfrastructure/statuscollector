@@ -74,14 +74,18 @@ class ModelGauge:
     def __init__(self, name, helptext, labelmap, idlabel, model, selector):
         """
         Model is a function of zero arguments that returns a map from id
-        to dictionary. Each key of labelmap is expected to be a key of
-        each model dictionary. The value of the idlabel key is expected
-        to be unique among all model dictionaries.
+        to model dictionary. Each key of labelmap is expected to be a key
+        of each model dictionary.
 
         Selector is a function from model dictionary to the (numeric) value
         of the gauge.
+
+        idlabel is the name of the key that is the unique primary key of
+        the model, and the model must be a map from that primary key to
+        the model dictionary for that key. Only the labels corresponding to
+        current model dictionary will be exported (not labels corresponding
+        to an earlier model dictionary).
         """
-        assert idlabel in labelmap, (idlabel, labelmap)
         self.labels = sorted(labelmap.keys())
         self.idlabel, self.model, self.selector = idlabel, model, selector
         self.id2labelvalues_map = {}
@@ -103,7 +107,6 @@ class ModelGauge:
                 assert idvalue in self.model(), (self.labels, idvalue, self.model())
                 return self.selector(self.model()[idvalue])
             self.gauge.labels(*new_labelvalues).set_function(_select)
-            #self.gauge.labels(*new_labelvalues).set_function(lambda idvalue=idvalue: self.selector(self.model()[idvalue]))
             if old_labelvalues:
                 self.gauge.remove(*old_labelvalues)
 
