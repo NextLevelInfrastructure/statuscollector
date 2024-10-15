@@ -41,6 +41,10 @@ class FrontlineGauge:
                 return datetime.fromisoformat(v).timestamp()
             return v
         self.gauge = ModelGauge(metric, metric_desc, labelmap, 'id', model, _selector)
+        self.update()
+
+    def update(self):
+        self.gauge.update()
 
 
 class PrometheusWrapper:
@@ -62,6 +66,8 @@ class PrometheusWrapper:
         self.id2customer_map = {}
         self.id2location_map = {}
         self.id2node_map = {}
+        self.gauges = []
+        self.nodegauges = []
         self._maybe_refresh()
 
         labelmap = { k: k for k in ['name', 'locked', 'acceptLanguage', 'email'] }
@@ -70,50 +76,49 @@ class PrometheusWrapper:
         def _custmodel():
             self._maybe_refresh()
             return self.id2customer_map
-        self.custverified_g = FrontlineGauge('frontline_customer_email_verified', '1 if email verified, 0 otherwise', labelmap, _custmodel, lambda model_dict: model_dict.get('emailVerified', 0))
-        self.custcreated_g = FrontlineGauge('frontline_customer_created_ts', 'When the customer was created', { 'id': 'custid', 'accountId': 'nlid' }, _custmodel, lambda model_dict: model_dict['createdAt'])
-        self.custfirstlogin_g = FrontlineGauge('frontline_customer_first_login_ts', 'When the customer first logged in successfully, 0=never', { 'id': 'custid', 'accountId': 'nlid' }, _custmodel, lambda model_dict: model_dict.get('firstKnownLoginTimestamp', 0))
+        self.gauges.append(FrontlineGauge('frontline_customer_email_verified', '1 if email verified, 0 otherwise', labelmap, _custmodel, lambda model_dict: model_dict.get('emailVerified', 0)))
+        self.gauges.append(FrontlineGauge('frontline_customer_created_ts', 'When the customer was created', { 'id': 'custid', 'accountId': 'nlid' }, _custmodel, lambda model_dict: model_dict['createdAt']))
+        self.gauges.append(FrontlineGauge('frontline_customer_first_login_ts', 'When the customer first logged in successfully, 0=never', { 'id': 'custid', 'accountId': 'nlid' }, _custmodel, lambda model_dict: model_dict.get('firstKnownLoginTimestamp', 0)))
 
         nodelabelmap = { k: k for k in ['id', 'nlid', 'custid', 'locid', 'model', 'mac', 'ethernet1Mac', 'serialNumber', 'shipDate', 'partNumber', 'firmwareVersion', 'nickname', 'backhaulType', 'ip', 'wanIp', 'publicIp', 'openSyncVersion'] }
         def _nodemodel():
             self._maybe_refresh()
             return self.id2node_map
-        self.nodeinfo_g = FrontlineGauge('frontline_node_info', 'Node informational labels', nodelabelmap, _nodemodel, lambda d: 1)
+        self.nodegauges.append(FrontlineGauge('frontline_node_info', 'Node informational labels', nodelabelmap, _nodemodel, lambda d: 1))
         identmap = { 'id': 'id', 'nlid': 'nlid' }
-        self.nodehealth_g = FrontlineGauge('frontline_node_health', 'Health score of the node, -1=not connected', identmap, _nodemodel, lambda d: -1 if d['connectionState'] != 'connected' else d.get('health', {}).get('score', -2))
-        self.nodeisbridge_g = FrontlineGauge('frontline_node_is_bridge', '1 iff node is in bridge mode', identmap, _nodemodel, lambda d: d.get('networkMode', '') == 'bridge')
-        self.nodeconnecteddevices_g = FrontlineGauge('frontline_node_connected_devices', 'Count of devices connected to the node', identmap, _nodemodel, lambda d: d.get('connectedDeviceCount', -1))
-        self.nodeconnectionstatechange_g = FrontlineGauge('frontline_node_connectivity_change_ts', 'Timestamp at which connection state changed', identmap, _nodemodel, lambda d: d.get('connectionStateChangeAt', -1))
-        self.nodeboot_g = FrontlineGauge('frontline_node_boot_ts', 'Timestamp at which node booted', identmap, _nodemodel, lambda d: d.get('bootAt', -1))
-        self.nodeboot_g = FrontlineGauge('frontline_node_claim_ts', 'Timestamp at which node was claimed', identmap, _nodemodel, lambda d: d['claimedAt'])
+        self.nodegauges.append(FrontlineGauge('frontline_node_health', 'Health score of the node, -1=not connected', identmap, _nodemodel, lambda d: -1 if d['connectionState'] != 'connected' else d.get('health', {}).get('score', -2)))
+        self.nodegauges.append(FrontlineGauge('frontline_node_is_bridge', '1 iff node is in bridge mode', identmap, _nodemodel, lambda d: d.get('networkMode', '') == 'bridge'))
+        self.nodegauges.append(FrontlineGauge('frontline_node_connected_devices', 'Count of devices connected to the node', identmap, _nodemodel, lambda d: d.get('connectedDeviceCount', -1)))
+        self.nodegauges.append(FrontlineGauge('frontline_node_connectivity_change_ts', 'Timestamp at which connection state changed', identmap, _nodemodel, lambda d: d.get('connectionStateChangeAt', -1)))
+        self.nodegauges.append(FrontlineGauge('frontline_node_boot_ts', 'Timestamp at which node booted', identmap, _nodemodel, lambda d: d.get('bootAt', -1)))
+        self.nodegauges.append(FrontlineGauge('frontline_node_claim_ts', 'Timestamp at which node was claimed', identmap, _nodemodel, lambda d: d['claimedAt']))
         def _linkmodel():
             self._maybe_refresh()
             return { f'{node["id"]}-{link["ifName"]}': dict(link, id=f'{node["id"]}-{link["ifName"]}', nlid=node['nlid'], nodeid=node['id']) for node in self.id2node_map.values() if 'linkStates' in node for link in node.get('linkStates', []) }
         linkmap = { k: k for k in ['nlid', 'ifName', 'duplex', 'isUplink', 'hasEthClient'] }
         linkmap['nodeid'] = 'id'
-        self.nodelink_g = FrontlineGauge('frontline_node_link_speed', 'Speed of link, 65535=no link', linkmap, _linkmodel, lambda d: d['linkSpeed'])
+        self.nodegauges.append(FrontlineGauge('frontline_node_link_speed', 'Speed of link, 65535=no link', linkmap, _linkmodel, lambda d: d['linkSpeed']))
         def _parentmodel():
             self._maybe_refresh()
             return { nodeid: dict(node, radio=node['leafToRoot'][0].get('radio', ''), parentId=node['leafToRoot'][0]['id']) for (nodeid, node) in self.id2node_map.items() if node.get('leafToRoot') }
         parentmap = { k: k for k in ['id', 'nlid', 'radio', 'parentId'] }
-        self.nodeparent_g = FrontlineGauge('frontline_node_parent_wifi_channel', '-1 iff link to parent node is not wifi', parentmap, _parentmodel, lambda d: -1 if d['leafToRoot'][0].get('medium', '') != 'wifi' else d['leafToRoot'][0].get('channel', -1))
+        self.nodegauges.append(FrontlineGauge('frontline_node_parent_wifi_channel', '-1 iff link to parent node is not wifi', parentmap, _parentmodel, lambda d: -1 if d['leafToRoot'][0].get('medium', '') != 'wifi' else d['leafToRoot'][0].get('channel', -1)))
         def _speedmodel():
             self._maybe_refresh()
             return { node['id']: dict(node['speedTest'], id=node['id'], nlid=node['nlid']) for node in self.id2node_map.values() if node.get('speedTest') }
         speedmap = { 'id': 'id', 'nlid': 'nlid' }
-        self.nodertt_g = FrontlineGauge('frontline_node_speedtest_rtt', 'RTT of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['rtt'])
-        self.nodeupload_g = FrontlineGauge('frontline_node_upload_mbps', 'Upload speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['upload'])
-        self.nodedownload_g = FrontlineGauge('frontline_node_download_mbps', 'Download speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['download'])
+        self.nodegauges.append(FrontlineGauge('frontline_node_speedtest_rtt', 'RTT of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['rtt']))
+        self.nodegauges.append(FrontlineGauge('frontline_node_upload_mbps', 'Upload speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['upload']))
+        self.nodegauges.append(FrontlineGauge('frontline_node_download_mbps', 'Download speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['download']))
         speedmap.update({ k: k for k in ['trigger', 'gateway', 'serverIp', 'serverHost', 'serverId' ] })
-        self.nodespeedinfo_g = FrontlineGauge('frontline_node_speedtest_start_ts', 'Start time for most recent speedtest', speedmap, _speedmodel, lambda d: d['startedAt'])
+        self.nodegauges.append(FrontlineGauge('frontline_node_speedtest_start_ts', 'Start time for most recent speedtest', speedmap, _speedmodel, lambda d: d['startedAt']))
 
         def _channelmodel():
             self._maybe_refresh()
             return { f'{node["id"]}-{stat["freqBand"]}': dict(node, id=f'{node["id"]}-{stat["freqBand"]}', nodeid=node['id'], freqBand=stat['freqBand'], channelWidth=stat['channelWidth'], numPunctured=len(stat['puncturedChannels']), nlichannel=(node['2gChannel'] if stat['freqBand'] == '2.4G' else node['5guChannel'] if stat['freqBand'] == '5GU' else node['5glChannel'] if stat['freqBand'] == '5GL' else -999)) for node in self.id2node_map.values() if 'radioStats' in node for stat in node.get('radioStats', []) }
         channelmap = { k: k for k in ['nlid', 'freqBand', 'channelWidth'] }
         channelmap['nodeid'] = 'id'
-        self.nodechannel_g = FrontlineGauge('frontline_node_channel', 'Channel in use for each frequency band', channelmap, _channelmodel, lambda d: d['nlichannel'])
-
+        self.nodegauges.append(FrontlineGauge('frontline_node_channel', 'Channel in use for each frequency band', channelmap, _channelmodel, lambda d: d['nlichannel']))
 
         # frontline_node_channel: nodeid, nlid, radioStats['freqBand'], 'channelWidth', len('puncturedChannels') has value 2gChannel, 5guChannel, 5glChannel depending on freqBand
         # whether an alert is being shown
@@ -126,9 +131,14 @@ class PrometheusWrapper:
             if time.time() - self.last_location_update > self.MIN_UPDATE_INTERVAL:
                 oldtime = self.last_location_update
                 self.last_location_update = newtime
+            # safe to release the lock here because (we assume) that the
+            # min update interval is long enough that this method will exit
+            # before any other thread has oldtime != -1.
         if oldtime != -1:
             try:
                 self._refresh()
+                for g in self.gauges:
+                    g.update()
             except requests.exceptions.ReadTimeout:
                 LOGGER.exception()
                 self.errors += 1
@@ -137,18 +147,25 @@ class PrometheusWrapper:
                     if self.last_location_update == newtime:
                         self.last_location_update = oldtime
         with self.lock:
+            do_update = False
             if time.time() - self.last_node_update > self.MIN_NODE_UPDATE_INTERVAL:
-                self._refresh_some_nodes()
+                self._refresh_some_nodes_locked()
                 self.last_node_update = time.time()
-        now = datetime.utcnow()
-        if (self.emailday == now.weekday() and self.emailhour <= now.hour and
-            time.time() - self.last_email > 3600*12):
-            try:
-                self._send_email()
-                self.last_email = time.time()
-            except botocore.exceptions.ClientError:
-                EMAIL_ERRORS.labels(organization='UNKNOWN').inc()
-                LOGGER.exception()
+                do_update = True
+            # safe to release the lock here because g.update() is thread-safe
+        if do_update:
+            for g in self.nodegauges:
+                g.update()
+        with self.lock:
+            now = datetime.utcnow()
+            if (self.emailday == now.weekday() and self.emailhour <= now.hour
+                and time.time() - self.last_email > 3600*12):
+                try:
+                    self._send_email()
+                    self.last_email = time.time()
+                except botocore.exceptions.ClientError:
+                    EMAIL_ERRORS.labels(organization='UNKNOWN').inc()
+                    LOGGER.exception()
 
     def _send_email(self):
         # see https://codelovingyogi.medium.com/sending-emails-using-aws-simple-email-service-ses-220de9db4fc8
@@ -186,7 +203,7 @@ class PrometheusWrapper:
         LOGGER.info('refresh complete')
 
     @REQUEST_NODE_TIME.time()
-    def _refresh_some_nodes(self):
+    def _refresh_some_nodes_locked(self):
         def _upper(d, k):
             v = d.get(k)
             if v:
