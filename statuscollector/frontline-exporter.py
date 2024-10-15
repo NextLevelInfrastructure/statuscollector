@@ -98,11 +98,26 @@ class PrometheusWrapper:
         linkmap = { k: k for k in ['nlid', 'ifName', 'duplex', 'isUplink', 'hasEthClient'] }
         linkmap['nodeid'] = 'id'
         self.nodegauges.append(FrontlineGauge('frontline_node_link_speed', 'Speed of link, 65535=no link', linkmap, _linkmodel, lambda d: d['linkSpeed']))
+        def _radiofallback(d):
+            channel = d['leafToRoot'][0].get('channel', d.get('backhaulChannel'))
+            if channel is not None:
+                for band in ['2g', '5gu', '5gl']:
+                    if channel == d.get(f'{band}Channel'):
+                        return band.upper()
+                return 'unknown_band'
+            return 'unknown_channel'
         def _parentmodel():
             self._maybe_refresh()
-            return { nodeid: dict(node, radio=node['leafToRoot'][0].get('radio', ''), parentId=node['leafToRoot'][0]['id']) for (nodeid, node) in self.id2node_map.items() if node.get('leafToRoot') }
+            return { nodeid: dict(node, radio=node['leafToRoot'][0].get('radio', _radiofallback(node)), parentId=node['leafToRoot'][0]['id']) for (nodeid, node) in self.id2node_map.items() if node.get('leafToRoot') }
         parentmap = { k: k for k in ['id', 'nlid', 'radio', 'parentId'] }
-        self.nodegauges.append(FrontlineGauge('frontline_node_parent_wifi_channel', '-1 iff link to parent node is not wifi', parentmap, _parentmodel, lambda d: -1 if d['leafToRoot'][0].get('medium', '') != 'wifi' else d['leafToRoot'][0].get('channel', -1)))
+        def _channelselector(d):
+            if d.get('backhaulType', '') != 'wifi':
+                return -1
+            channel = d['leafToRoot'][0].get('channel')
+            if channel is not None:
+                return channel
+            return d.get('backhaulChannel', -99)
+        self.nodegauges.append(FrontlineGauge('frontline_node_parent_wifi_channel', '-1 iff link to parent node is not wifi', parentmap, _parentmodel, _channelselector))
         def _speedmodel():
             self._maybe_refresh()
             return { node['id']: dict(node['speedTest'], id=node['id'], nlid=node['nlid']) for node in self.id2node_map.values() if node.get('speedTest') }
@@ -139,7 +154,8 @@ class PrometheusWrapper:
                 self._refresh()
                 for g in self.gauges:
                     g.update()
-            except requests.exceptions.ReadTimeout:
+            except (requests.exceptions.ReadTimeout,
+                    requests.exceptions.ConnectionError):
                 LOGGER.exception()
                 self.errors += 1
                 # reset the last update time so we try again pronto
@@ -149,8 +165,13 @@ class PrometheusWrapper:
         with self.lock:
             do_update = False
             if time.time() - self.last_node_update > self.MIN_NODE_UPDATE_INTERVAL:
-                self._refresh_some_nodes_locked()
-                self.last_node_update = time.time()
+                try:
+                    self._refresh_some_nodes_locked()
+                    self.last_node_update = time.time()
+                except (requests.exceptions.ReadTimeout,
+                        requests.exceptions.ConnectionError):
+                    LOGGER.exception()
+                    self.errors += 1
                 do_update = True
             # safe to release the lock here because g.update() is thread-safe
         if do_update:
