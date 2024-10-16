@@ -101,7 +101,7 @@ class PrometheusWrapper:
         def _radiofallback(d):
             channel = d['leafToRoot'][0].get('channel', d.get('backhaulChannel'))
             if channel is not None:
-                for band in ['2g', '5gu', '5gl']:
+                for band in ['2g', '5gu', '5gl', '5g', '6g']:
                     if channel == d.get(f'{band}Channel'):
                         return band.upper()
                 return 'unknown_band'
@@ -128,9 +128,18 @@ class PrometheusWrapper:
         speedmap.update({ k: k for k in ['trigger', 'gateway', 'serverIp', 'serverHost', 'serverId' ] })
         self.nodegauges.append(FrontlineGauge('frontline_node_speedtest_start_ts', 'Start time for most recent speedtest', speedmap, _speedmodel, lambda d: d['startedAt']))
 
+        def _nlichannel(node, stat):
+            lowerc = stat['freqBand'].lower()
+            channel = node.get(f'{lowerc}Channel')
+            if channel is not None:
+                return channel
+            if stat['freqBand'] == '2.4G':
+                return node['2gChannel']
+            LOGGER.info(f'unknown freqBand {stat["freqBand"]} for node {node}')
+            return -999
         def _channelmodel():
             self._maybe_refresh()
-            return { f'{node["id"]}-{stat["freqBand"]}': dict(node, id=f'{node["id"]}-{stat["freqBand"]}', nodeid=node['id'], freqBand=stat['freqBand'], channelWidth=stat['channelWidth'], numPunctured=len(stat['puncturedChannels']), nlichannel=(node['2gChannel'] if stat['freqBand'] == '2.4G' else node['5guChannel'] if stat['freqBand'] == '5GU' else node['5glChannel'] if stat['freqBand'] == '5GL' else -999)) for node in self.id2node_map.values() if 'radioStats' in node for stat in node.get('radioStats', []) }
+            return { f'{node["id"]}-{stat["freqBand"]}': dict(node, id=f'{node["id"]}-{stat["freqBand"]}', nodeid=node['id'], freqBand=stat['freqBand'], channelWidth=stat['channelWidth'], numPunctured=len(stat['puncturedChannels']), nlichannel=_nlichannel(node, stat)) for node in self.id2node_map.values() if 'radioStats' in node for stat in node.get('radioStats', []) }
         channelmap = { k: k for k in ['nlid', 'freqBand', 'channelWidth'] }
         channelmap['nodeid'] = 'id'
         self.nodegauges.append(FrontlineGauge('frontline_node_channel', 'Channel in use for each frequency band', channelmap, _channelmodel, lambda d: d['nlichannel']))
