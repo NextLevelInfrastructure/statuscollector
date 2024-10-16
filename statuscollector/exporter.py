@@ -116,9 +116,12 @@ class ModelGauge:
             # now remove all keys that were in the old model but not the new
             for k in self.old_model_keys:
                 old_labelvalues = self.id2labelvalues_map.get(k)
-                LOGGER.info(f'removing deleted primary key {old_labelvalues}')
                 assert old_labelvalues, (k, self.old_model_keys)
-                self.gauge.remove(*old_labelvalues)
+                try:
+                    self.gauge.remove(*old_labelvalues)
+                    LOGGER.info(f'removed deleted primary key {old_labelvalues}')
+                except KeyError:
+                    LOGGER.info(f'primary key {old_labelvalues} could not be deleted as it was not present')
             self.old_model_keys = set(model.keys())
 
     def _update(self, new_kv):
@@ -230,25 +233,37 @@ class PrometheusWrapper:
         self.errors_g.set_function(lambda: self.errors)
 
     def _maybe_refresh(self):
+        oldtime = -1
+        newtime = time.time()
         with self.lock:
             if time.time() - self.last_update > self.MIN_UPDATE_INTERVAL:
-                try:
-                    self._refresh()
-                    self.last_update = time.time()
-                    for g in self.gauges:
-                        g.update()
-                except requests.exceptions.ReadTimeout:
-                    LOGGER.exception()
-                    self.errors += 1
-        now = datetime.utcnow()
-        if (self.emailday == now.weekday() and self.emailhour <= now.hour and
-            time.time() - self.last_email > 3600*12):
+                oldtime = self.last_update
+                self.last_update = newtime
+            # safe to release the lock here because (we assume) that the
+            # min update interval is long enough that this method will exit
+            # before any other thread has oldtime != -1.
+        if oldtime != -1:
             try:
-                self._send_email()
-                self.last_email = self.last_update
-            except botocore.exceptions.ClientError:
-                EMAIL_ERRORS.labels(organization='UNKNOWN').inc()
+                self._refresh()
+                for g in self.gauges:
+                    g.update()
+            except requests.exceptions.ReadTimeout:
                 LOGGER.exception()
+                self.errors += 1
+                # reset the last update time so we try again pronto
+                with self.lock:
+                    if self.last_update == newtime:
+                        self.last_update = oldtime
+        with self.lock:
+            now = datetime.utcnow()
+            if (self.emailday == now.weekday() and self.emailhour <= now.hour
+                and time.time() - self.last_email > 3600*12):
+                try:
+                    self._send_email()
+                    self.last_email = self.last_update
+                except botocore.exceptions.ClientError:
+                    EMAIL_ERRORS.labels(organization='UNKNOWN').inc()
+                    LOGGER.exception()
 
     def _send_email(self):
         # see https://codelovingyogi.medium.com/sending-emails-using-aws-simple-email-service-ses-220de9db4fc8
