@@ -194,14 +194,14 @@ class PrometheusWrapper:
         ]
         def _clientmodel():
             self._maybe_refresh()
-            return self.id2client_map
+            return self.id2allclients_map
         def _stateselector(model_dict):
             return ClientStatus.from_client(model_dict).value
         self.gauges.append(UispClientGauge('uisp_client_state', 'UISP client state', clientlabels, _clientmodel, _stateselector))
         contactlabels = ['id', 'clientId', 'email', 'phone', 'name', 'types']
         def _contactmodel():
             self._maybe_refresh()
-            return { contact['id']: dict(contact, userIdent=client['userIdent'], types=','.join(sorted([t['name'] for t in contact['types']]))) for client in self.id2client_map.values() for contact in client['contacts'] }
+            return { contact['id']: dict(contact, userIdent=client['userIdent'], types=','.join(sorted([t['name'] for t in contact['types']]))) for client in self.id2allclients_map.values() for contact in client['contacts'] }
         self.gauges.append(UispClientGauge('uisp_client_contact', 'UISP client contact info', contactlabels, _contactmodel, lambda model_dict: 1))
         self.gauges.append(UispClientGauge('uisp_client_balance', 'UISP client balance, negative means client owes us', ['id', 'currencyCode'], _clientmodel, lambda d: d['accountBalance']))
         self.gauges.append(UispClientGauge('uisp_client_pastdue', 'UISP client pastdue balance', ['id'], _clientmodel, lambda d: d['hasOverdueInvoice']))
