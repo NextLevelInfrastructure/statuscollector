@@ -155,6 +155,9 @@ class UispClientGauge:
             return v
         self.gauge = ModelGauge(metric, metric_desc, labelmap, 'id', model, _selector)
 
+    def update(self):
+        return self.gauge.update()
+
 
 class PrometheusWrapper:
     """
