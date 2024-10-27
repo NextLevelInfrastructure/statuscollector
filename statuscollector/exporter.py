@@ -131,11 +131,17 @@ class ModelGauge:
         if old_labelvalues != new_labelvalues:
             self.id2labelvalues_map[idvalue] = new_labelvalues
             def _select():
+                if idvalue not in self.model():
+                    LOGGER.warning(f'{self.name} model has no value for key {idvalue}; queried for labels {self.labels}')
+                    return -999
                 assert idvalue in self.model(), (self.labels, idvalue, self.model())
                 return self.selector(self.model()[idvalue])
             self.gauge.labels(*new_labelvalues).set_function(_select)
             if old_labelvalues:
-                self.gauge.remove(*old_labelvalues)
+                try:
+                    self.gauge.remove(*old_labelvalues)
+                except KeyError:
+                    LOGGER.warning(f'could not remove {old_labelvalues} from {self.name}')
 
 
 class UispClientGauge:
