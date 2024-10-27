@@ -22,6 +22,8 @@ EMAIL_SUCCESS = prometheus_client.Gauge('frontline_email_success_count',
                                         'number of emails sent successfully', ['organization'])
 EMAIL_ERRORS = prometheus_client.Gauge('frontline_email_error_count',
                                        'number of email sending errors', ['organization'])
+LOCATIONS_UPDATED = prometheus_client.Gauge('frontline_locations_updated',
+                                       'number of locations updated since startup')
 
 
 class FrontlineGauge:
@@ -246,16 +248,18 @@ class PrometheusWrapper:
             return dict(node, nlid=self.id2customer_map[loc['custid']]['accountId'], custid=loc['custid'], locid=loc['id'])
         if self.id2node_map:
             start = time.time()
-            updated = 0
             while time.time() - start < self.NODE_UPDATE_INTERVAL:
                 if self.next_location_to_update >= len(self.locations_to_update):
                     self.next_location_to_update = 0
                     LOGGER.info('updated nodes at all known locations; starting over')
                 locid = self.locations_to_update[self.next_location_to_update]
                 self.next_location_to_update += 1
-                loc = self.id2location_map[locid]
-                self.id2node_map.update({ node['id']: _makedict(loc, node) for node in self.frontline.get_nodes_by_customerid(loc['custid'], loc['id']) })
-                updated += 1
+                loc = self.id2location_map.get(locid)
+                if loc is None:
+                    LOGGER.info(f'not updating {locid} as it is not present in id2location_map')
+                else:
+                    self.id2node_map.update({ node['id']: _makedict(loc, node) for node in self.frontline.get_nodes_by_customerid(loc['custid'], loc['id']) })
+                    LOCATIONS_UPDATED.inc()
         else:
             # the first time, we grab them all
             LOGGER.info('refreshing all Frontline nodes')
