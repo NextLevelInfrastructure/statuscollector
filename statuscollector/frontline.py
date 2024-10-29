@@ -96,7 +96,14 @@ class FrontlineClient:
         return self.bearer_json_request(requests.get, f'/partners/customers/search/{name}?field=name&exactMatch={"true" if exact else "false"}&limit={limit}&skip={skip}')
 
     def get_nodes_by_customerid(self, customerid, locationid):
-        return self.bearer_json_request(requests.get, f'/Customers/{customerid}/locations/{locationid}/nodes')['nodes']
+        try:
+            return self.bearer_json_request(requests.get, f'/Customers/{customerid}/locations/{locationid}/nodes')['nodes']
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # customer or location no longer exists
+                return []
+            else:
+                raise
 
     # also worth looking at
     # https://piranha-gamma.prod.us-west-2.aws.plumenet.io/api/Customers/642cc40d71d99d000a611549/locations/642cc40d71d99d000a61154b/appFacade/home?client_id=0oa16a2cw1IIfsm7N357
@@ -161,7 +168,14 @@ class FrontlineClient:
         return [x for xs in xss for x in xs]  # flatten
 
     def get_locations_by_customerid(self, customerid):
-        return self.bearer_json_request(requests.get, f'/Customers/{customerid}/locations')
+        try:
+            return self.bearer_json_request(requests.get, f'/Customers/{customerid}/locations')
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # customer no longer exists
+                return []
+            else:
+                raise
 
     def get_customers(self, offset=None):
         filter = '{"offset":' + str(offset) + ',"limit":500}'
