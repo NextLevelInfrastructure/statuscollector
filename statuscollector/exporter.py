@@ -141,7 +141,7 @@ class ModelGauge:
                 try:
                     self.gauge.remove(*old_labelvalues)
                 except KeyError:
-                    LOGGER.warning(f'could not remove {old_labelvalues} from {self.name}')
+                    LOGGER.info(f'could not remove {old_labelvalues} from {self.name}')
 
 
 class UispClientGauge:
@@ -254,7 +254,7 @@ class PrometheusWrapper:
                 for g in self.gauges:
                     g.update()
             except requests.exceptions.ReadTimeout:
-                LOGGER.exception()
+                LOGGER.exception('read timeout updating gauges')
                 self.errors += 1
                 # reset the last update time so we try again pronto
                 with self.lock:
@@ -269,7 +269,7 @@ class PrometheusWrapper:
                     self.last_email = self.last_update
                 except botocore.exceptions.ClientError:
                     EMAIL_ERRORS.labels(organization='UNKNOWN').inc()
-                    LOGGER.exception()
+                    LOGGER.exception('error sending email')
 
     def _send_email(self):
         # see https://codelovingyogi.medium.com/sending-emails-using-aws-simple-email-service-ses-220de9db4fc8

@@ -167,7 +167,7 @@ class PrometheusWrapper:
                     g.update()
             except (requests.exceptions.ReadTimeout,
                     requests.exceptions.ConnectionError):
-                LOGGER.exception()
+                LOGGER.exception('read error while refreshing gauges')
                 self.errors += 1
                 # reset the last update time so we try again pronto
                 with self.lock:
@@ -181,7 +181,7 @@ class PrometheusWrapper:
                     self.last_node_update = time.time()
                 except (requests.exceptions.ReadTimeout,
                         requests.exceptions.ConnectionError):
-                    LOGGER.exception()
+                    LOGGER.exception('read error while refreshing nodes')
                     self.errors += 1
                 do_update = True
             # safe to release the lock here because g.update() is thread-safe
@@ -197,7 +197,7 @@ class PrometheusWrapper:
                     self.last_email = time.time()
                 except botocore.exceptions.ClientError:
                     EMAIL_ERRORS.labels(organization='UNKNOWN').inc()
-                    LOGGER.exception()
+                    LOGGER.exception('sending email')
 
     def _send_email(self):
         # see https://codelovingyogi.medium.com/sending-emails-using-aws-simple-email-service-ses-220de9db4fc8
