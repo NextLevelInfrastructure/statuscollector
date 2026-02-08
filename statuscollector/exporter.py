@@ -119,9 +119,9 @@ class ModelGauge:
                 assert old_labelvalues, (k, self.old_model_keys)
                 try:
                     self.gauge.remove(*old_labelvalues)
-                    LOGGER.info(f'removed deleted primary key {old_labelvalues}')
+                    LOGGER.info(f'removed deleted primary key {old_labelvalues} for {self.name} {self.old_model_keys}')
                 except KeyError:
-                    LOGGER.info(f'primary key {old_labelvalues} could not be deleted as it was not present')
+                    LOGGER.info(f'primary key {old_labelvalues} could not be deleted as it was not present for {self.name} {self.old_model_keys}')
             self.old_model_keys = set(model.keys())
 
     def _update(self, new_kv):
