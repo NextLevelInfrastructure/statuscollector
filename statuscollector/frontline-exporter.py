@@ -122,7 +122,6 @@ class PrometheusWrapper:
             return d.get('backhaulChannel', -99)
         self.nodegauges.append(FrontlineGauge('frontline_node_parent_wifi_channel', '-1 iff link to parent node is not wifi', parentmap, _parentmodel, _channelselector))
         def _speedmodel():
-            self._maybe_refresh()
             return self.node_speedtests
             
         speedmap = { 'id': 'nodeid', 'nlid': 'nlid', 'startedAt': 'startedAt' }
