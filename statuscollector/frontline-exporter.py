@@ -123,21 +123,6 @@ class PrometheusWrapper:
         self.nodegauges.append(FrontlineGauge('frontline_node_parent_wifi_channel', '-1 iff link to parent node is not wifi', parentmap, _parentmodel, _channelselector))
         def _speedmodel():
             self._maybe_refresh()
-            # keep the last 30 days of speedtest
-            cutoff = time.time() - 30 * 24 * 3600
-            for node in self.id2node_map.values():
-                st = node.get('speedTest')
-                if st:
-                    stid = f"{node['id']}-{st['startedAt']}"
-                    self.node_speedtests[stid] = dict(st, id=stid, nodeid=node['id'], nlid=node['nlid'])
-            for stid in list(self.node_speedtests.keys()):
-                st = self.node_speedtests[stid]
-                try:
-                    ts = datetime.fromisoformat(st['startedAt'].replace('Z', '+00:00')).timestamp()
-                    if ts < cutoff:
-                        del self.node_speedtests[stid]
-                except Exception:
-                    pass
             return self.node_speedtests
             
         speedmap = { 'id': 'nodeid', 'nlid': 'nlid', 'startedAt': 'startedAt' }
@@ -197,6 +182,7 @@ class PrometheusWrapper:
             if time.time() - self.last_node_update > self.MIN_NODE_UPDATE_INTERVAL:
                 try:
                     self._refresh_some_nodes_locked()
+                    self._prune_speedtests_locked()
                     self.last_node_update = time.time()
                 except (requests.exceptions.ReadTimeout,
                         requests.exceptions.ConnectionError):
@@ -286,6 +272,22 @@ class PrometheusWrapper:
             LOGGER.info('refresh complete')
             self.locations_to_update = sorted(self.id2location_map.keys())
             self.next_location_to_update = 0
+
+    def _prune_speedtests_locked(self):
+        cutoff = time.time() - 30 * 24 * 3600
+        for node in self.id2node_map.values():
+            st = node.get('speedTest')
+            if st:
+                stid = f"{node['id']}-{st['startedAt']}"
+                self.node_speedtests[stid] = dict(st, id=stid, nodeid=node['id'], nlid=node['nlid'])
+        for stid in list(self.node_speedtests.keys()):
+            st = self.node_speedtests[stid]
+            try:
+                ts = datetime.fromisoformat(st['startedAt'].replace('Z', '+00:00')).timestamp()
+                if ts < cutoff:
+                    del self.node_speedtests[stid]
+            except Exception:
+                pass
 
 
 def main(args):
