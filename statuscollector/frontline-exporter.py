@@ -182,7 +182,11 @@ class PrometheusWrapper:
             if time.time() - self.last_node_update > self.MIN_NODE_UPDATE_INTERVAL:
                 try:
                     self._refresh_some_nodes_locked()
-                    self._prune_speedtests_locked()
+                    
+                    if not hasattr(self, 'last_speedtest_prune') or time.time() - self.last_speedtest_prune > 3600:
+                        self._prune_speedtests_locked()
+                        self.last_speedtest_prune = time.time()
+                        
                     self.last_node_update = time.time()
                 except (requests.exceptions.ReadTimeout,
                         requests.exceptions.ConnectionError):
@@ -274,6 +278,7 @@ class PrometheusWrapper:
             self.next_location_to_update = 0
 
     def _prune_speedtests_locked(self):
+        LOGGER.info('pruning speedtests')
         cutoff = time.time() - 30 * 24 * 3600
         for node in self.id2node_map.values():
             st = node.get('speedTest')
