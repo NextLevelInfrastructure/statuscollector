@@ -293,6 +293,7 @@ class PrometheusWrapper:
                     del self.node_speedtests[stid]
             except Exception:
                 pass
+        LOGGER.info(f'pruning complete; {len(self.node_speedtests)} speedtests remaining')
 
 
 def main(args):
