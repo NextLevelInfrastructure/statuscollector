@@ -68,6 +68,7 @@ class PrometheusWrapper:
         self.id2customer_map = {}
         self.id2location_map = {}
         self.id2node_map = {}
+        self.node_speedtests = {}
         self.gauges = []
         self.nodegauges = []
         self._maybe_refresh()
@@ -122,13 +123,31 @@ class PrometheusWrapper:
         self.nodegauges.append(FrontlineGauge('frontline_node_parent_wifi_channel', '-1 iff link to parent node is not wifi', parentmap, _parentmodel, _channelselector))
         def _speedmodel():
             self._maybe_refresh()
-            return { node['id']: dict(node['speedTest'], id=node['id'], nlid=node['nlid']) for node in self.id2node_map.values() if node.get('speedTest') }
-        speedmap = { 'id': 'id', 'nlid': 'nlid' }
+            # keep the last 30 days of speedtest
+            cutoff = time.time() - 30 * 24 * 3600
+            for node in self.id2node_map.values():
+                st = node.get('speedTest')
+                if st:
+                    stid = f"{node['id']}-{st['startedAt']}"
+                    self.node_speedtests[stid] = dict(st, id=stid, nodeid=node['id'], nlid=node['nlid'])
+            for stid in list(self.node_speedtests.keys()):
+                st = self.node_speedtests[stid]
+                try:
+                    ts = datetime.fromisoformat(st['startedAt'].replace('Z', '+00:00')).timestamp()
+                    if ts < cutoff:
+                        del self.node_speedtests[stid]
+                except Exception:
+                    pass
+            return self.node_speedtests
+            
+        speedmap = { 'id': 'nodeid', 'nlid': 'nlid', 'startedAt': 'startedAt' }
         self.nodegauges.append(FrontlineGauge('frontline_node_speedtest_rtt', 'RTT of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['rtt']))
         self.nodegauges.append(FrontlineGauge('frontline_node_upload_mbps', 'Upload speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['upload']))
         self.nodegauges.append(FrontlineGauge('frontline_node_download_mbps', 'Download speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['download']))
-        speedmap.update({ k: k for k in ['trigger', 'gateway', 'serverIp', 'serverHost', 'serverId' ] })
-        self.nodegauges.append(FrontlineGauge('frontline_node_speedtest_start_ts', 'Start time for most recent speedtest', speedmap, _speedmodel, lambda d: d['startedAt']))
+        speedmap_ts = speedmap.copy()
+        del speedmap_ts['startedAt']
+        speedmap_ts.update({ k: k for k in ['trigger', 'gateway', 'serverIp', 'serverHost', 'serverId' ] })
+        self.nodegauges.append(FrontlineGauge('frontline_node_speedtest_start_ts', 'Start time for most recent speedtest', speedmap_ts, _speedmodel, lambda d: d['startedAt']))
 
         def _nlichannel(node, stat):
             lowerc = stat['freqBand'].lower()
