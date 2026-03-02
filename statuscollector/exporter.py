@@ -106,34 +106,23 @@ class ModelGauge:
         """
         model = self.model()
         with self.lock:
-            try:
-                # Safely capture a snapshot of items in case the model dictionary
-                # is modified concurrently from another thread.
-                items = list(model.items())
-            except RuntimeError:
-                # Dictionary changed size during iteration; skip this update pass
-                return
-                
-            current_keys = set()
-            for (k, new_model_dict) in items:
+            for (k, new_model_dict) in model.items():
                 # if this assertion fails, the model is invalid. each key in a
                 # valid model should have a model dictionary mapping
                 # self.idlabel to the key
                 assert k == new_model_dict[self.idlabel], (k, new_model_dict)
-                current_keys.add(k)
                 self.old_model_keys.discard(k)
                 self._update(new_model_dict)
             # now remove all keys that were in the old model but not the new
             for k in self.old_model_keys:
                 old_labelvalues = self.id2labelvalues_map.get(k)
-                if not old_labelvalues:
-                    continue
+                assert old_labelvalues, (k, self.old_model_keys)
                 try:
                     self.gauge.remove(*old_labelvalues)
                     LOGGER.info(f'removed deleted primary key {old_labelvalues} for {self.name} {self.old_model_keys}')
                 except KeyError:
                     LOGGER.info(f'primary key {old_labelvalues} could not be deleted as it was not present for {self.name} {self.old_model_keys}')
-            self.old_model_keys = current_keys
+            self.old_model_keys = set(model.keys())
 
     def _update(self, new_kv):
         new_labelvalues = [new_kv.get(s, '') for s in self.labels]

@@ -56,11 +56,11 @@ class PrometheusWrapper:
 
     # per metrics query, we allow this many seconds of node updates
     NODE_UPDATE_INTERVAL = 10
-                            
+
     def __init__(self, config, emailday, emailhour):
         self.config, self.emailday, self.emailhour = config, emailday, emailhour
         self.frontline = FrontlineClient(self.config)
-        
+
         self.last_location_update, self.last_node_update, self.last_email = 0, 0, 0
         self.errors = 0
         self.lock = threading.Lock()
@@ -279,20 +279,15 @@ class PrometheusWrapper:
     def _prune_speedtests_locked(self):
         LOGGER.info('pruning speedtests')
         cutoff = time.time() - 30 * 24 * 3600
+        to_delete = [k for (k, v) in self.node_speedtests.values() if datetime.fromisoformat(v['startedAt'].replace('Z', '+00:00')).timestamp() < cutoff]
+        for stid in to_delete:
+            del self.node_speedtests[stid]
         for node in self.id2node_map.values():
             st = node.get('speedTest')
             if st:
                 stid = f"{node['id']}-{st['startedAt']}"
                 self.node_speedtests[stid] = dict(st, id=stid, nodeid=node['id'], nlid=node['nlid'])
-        for stid in list(self.node_speedtests.keys()):
-            st = self.node_speedtests[stid]
-            try:
-                ts = datetime.fromisoformat(st['startedAt'].replace('Z', '+00:00')).timestamp()
-                if ts < cutoff:
-                    del self.node_speedtests[stid]
-            except Exception:
-                pass
-        LOGGER.info(f'pruning complete; {len(self.node_speedtests)} speedtests remaining')
+        LOGGER.info(f'pruning/adding complete; {len(self.node_speedtests)} speedtests remaining')
 
 
 def main(args):
