@@ -142,7 +142,7 @@ class ModelGauge:
                     self.gauge.remove(*old_labelvalues)
                 except KeyError:
                     LOGGER.info(f'could not remove {old_labelvalues} from {self.name}')
-
+                    
 
 class UispClientGauge:
     def __init__(self, metric, metric_desc, copylabels, model, value_selector):

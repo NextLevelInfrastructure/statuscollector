@@ -279,7 +279,7 @@ class PrometheusWrapper:
     def _prune_speedtests_locked(self):
         LOGGER.info('pruning speedtests')
         cutoff = time.time() - 30 * 24 * 3600
-        to_delete = [k for (k, v) in self.node_speedtests.values() if datetime.fromisoformat(v['startedAt'].replace('Z', '+00:00')).timestamp() < cutoff]
+        to_delete = [k for (k, v) in self.node_speedtests.items() if datetime.fromisoformat(v['startedAt'].replace('Z', '+00:00')).timestamp() < cutoff]
         for stid in to_delete:
             del self.node_speedtests[stid]
         for node in self.id2node_map.values():
