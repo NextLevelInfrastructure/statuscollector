@@ -128,20 +128,17 @@ class ModelGauge:
         new_labelvalues = [new_kv.get(s, '') for s in self.labels]
         idvalue = new_kv[self.idlabel]
         old_labelvalues = self.id2labelvalues_map.get(idvalue)
+        val = self.selector(new_kv)
+        
         if old_labelvalues != new_labelvalues:
             self.id2labelvalues_map[idvalue] = new_labelvalues
-            def _select():
-                if idvalue not in self.model():
-                    LOGGER.warning(f'{self.name} model has no value for key {idvalue}; queried for labels {self.labels}')
-                    return -999
-                assert idvalue in self.model(), (self.labels, idvalue, self.model())
-                return self.selector(self.model()[idvalue])
-            self.gauge.labels(*new_labelvalues).set_function(_select)
             if old_labelvalues:
                 try:
                     self.gauge.remove(*old_labelvalues)
                 except KeyError:
                     LOGGER.info(f'could not remove {old_labelvalues} from {self.name}')
+                    
+        self.gauge.labels(*new_labelvalues).set(val)
                     
 
 class UispClientGauge:
