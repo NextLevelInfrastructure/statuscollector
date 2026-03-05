@@ -77,7 +77,6 @@ class PrometheusWrapper:
         labelmap['id'] = 'custid'
         labelmap['accountId'] = 'nlid'
         def _custmodel():
-            self._maybe_refresh()
             return self.id2customer_map
         self.gauges.append(FrontlineGauge('frontline_customer_email_verified', '1 if email verified, 0 otherwise', labelmap, _custmodel, lambda model_dict: model_dict.get('emailVerified', 0)))
         self.gauges.append(FrontlineGauge('frontline_customer_created_ts', 'When the customer was created', { 'id': 'custid', 'accountId': 'nlid' }, _custmodel, lambda model_dict: model_dict['createdAt']))
@@ -85,7 +84,6 @@ class PrometheusWrapper:
 
         nodelabelmap = { k: k for k in ['id', 'nlid', 'custid', 'locid', 'model', 'mac', 'ethernet1Mac', 'serialNumber', 'shipDate', 'partNumber', 'firmwareVersion', 'nickname', 'backhaulType', 'ip', 'wanIp', 'publicIp', 'openSyncVersion'] }
         def _nodemodel():
-            self._maybe_refresh()
             return self.id2node_map
         self.nodegauges.append(FrontlineGauge('frontline_node_info', 'Node informational labels', nodelabelmap, _nodemodel, lambda d: 1))
         identmap = { 'id': 'id', 'nlid': 'nlid' }
@@ -96,7 +94,6 @@ class PrometheusWrapper:
         self.nodegauges.append(FrontlineGauge('frontline_node_boot_ts', 'Timestamp at which node booted', identmap, _nodemodel, lambda d: d.get('bootAt', -1)))
         self.nodegauges.append(FrontlineGauge('frontline_node_claim_ts', 'Timestamp at which node was claimed', identmap, _nodemodel, lambda d: d['claimedAt']))
         def _linkmodel():
-            self._maybe_refresh()
             return { f'{node["id"]}-{link["ifName"]}': dict(link, id=f'{node["id"]}-{link["ifName"]}', nlid=node['nlid'], nodeid=node['id']) for node in self.id2node_map.values() if 'linkStates' in node for link in node.get('linkStates', []) }
         linkmap = { k: k for k in ['nlid', 'ifName', 'duplex', 'isUplink', 'hasEthClient'] }
         linkmap['nodeid'] = 'id'
@@ -110,7 +107,6 @@ class PrometheusWrapper:
                 return 'unknown_band'
             return 'unknown_channel'
         def _parentmodel():
-            self._maybe_refresh()
             return { nodeid: dict(node, radio=node['leafToRoot'][0].get('radio', _radiofallback(node)), parentId=node['leafToRoot'][0]['id']) for (nodeid, node) in self.id2node_map.items() if node.get('leafToRoot') }
         parentmap = { k: k for k in ['id', 'nlid', 'radio', 'parentId'] }
         def _channelselector(d):
@@ -143,7 +139,6 @@ class PrometheusWrapper:
             LOGGER.info(f'unknown freqBand {stat["freqBand"]} for node {node}')
             return -999
         def _channelmodel():
-            self._maybe_refresh()
             return { f'{node["id"]}-{stat["freqBand"]}': dict(node, id=f'{node["id"]}-{stat["freqBand"]}', nodeid=node['id'], freqBand=stat['freqBand'], channelWidth=stat['channelWidth'], numPunctured=len(stat['puncturedChannels']), nlichannel=_nlichannel(node, stat)) for node in self.id2node_map.values() if 'radioStats' in node for stat in node.get('radioStats', []) }
         channelmap = { k: k for k in ['nlid', 'freqBand', 'channelWidth'] }
         channelmap['nodeid'] = 'id'
@@ -318,7 +313,11 @@ def main(args):
         LOGGER.info(f'serving metrics on port {vals.port}')
         prometheus_client.start_http_server(vals.port)
         while True:
-            time.sleep(3600)
+            try:
+                wrapper._maybe_refresh()
+            except Exception:
+                LOGGER.exception('unexpected error in maybe_refresh')
+            time.sleep(15)
     else:
         LOGGER.warning('--port option not specified; exiting')
     return 1

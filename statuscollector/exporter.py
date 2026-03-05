@@ -202,14 +202,12 @@ class PrometheusWrapper:
             'username', 'isArchived', 
         ]
         def _clientmodel():
-            self._maybe_refresh()
             return self.id2allclients_map
         def _stateselector(model_dict):
             return ClientStatus.from_client(model_dict).value
         self.gauges.append(UispClientGauge('uisp_client_state', 'UISP client state', clientlabels, _clientmodel, _stateselector))
         contactlabels = ['id', 'clientId', 'email', 'phone', 'name', 'types']
         def _contactmodel():
-            self._maybe_refresh()
             return { contact['id']: dict(contact, userIdent=client['userIdent'], types=','.join(sorted([t['name'] for t in contact['types']]))) for client in self.id2allclients_map.values() for contact in client['contacts'] }
         self.gauges.append(UispClientGauge('uisp_client_contact', 'UISP client contact info', contactlabels, _contactmodel, lambda model_dict: 1))
         self.gauges.append(UispClientGauge('uisp_client_balance', 'UISP client balance, negative means client owes us', ['id', 'currencyCode'], _clientmodel, lambda d: d['accountBalance']))
@@ -224,7 +222,6 @@ class PrometheusWrapper:
             'downloadSpeed', 'uploadSpeed'
         ]
         def _servicemodel():
-            self._maybe_refresh()
             return self.id2service_map
         self.gauges.append(UispClientGauge('uisp_service_state', 'UISP service state', servicelabels, _servicemodel, lambda d: d['status']))
         self.gauges.append(UispClientGauge('uisp_service_active_from_ts', 'UISP service start timestamp', ['id', 'clientId'], _servicemodel, lambda d: d['activeFrom']))
@@ -381,7 +378,11 @@ def main(args):
         LOGGER.info(f'serving metrics on port {vals.port}')
         prometheus_client.start_http_server(vals.port)
         while True:
-            time.sleep(3600)
+            try:
+                wrapper._maybe_refresh()
+            except Exception:
+                LOGGER.exception('unexpected error in maybe_refresh')
+            time.sleep(15)
     else:
         LOGGER.warning('--port option not specified; exiting')
     return 1
