@@ -120,7 +120,7 @@ class PrometheusWrapper:
         def _speedmodel():
             return self.node_speedtests
             
-        speedmap = { 'id': 'nodeid', 'nlid': 'nlid', 'startedAt': 'startedAt' }
+        speedmap = { 'id': 'id', 'nlid': 'nlid', 'startedAt': 'startedAt' }
         self.nodegauges.append(FrontlineGauge('frontline_node_speedtest_rtt', 'RTT of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['rtt']))
         self.nodegauges.append(FrontlineGauge('frontline_node_upload_mbps', 'Upload speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['upload']))
         self.nodegauges.append(FrontlineGauge('frontline_node_download_mbps', 'Download speed of speedtest', speedmap, _speedmodel, lambda d: -1 if d['status'] != 'succeeded' else d['download']))
@@ -272,18 +272,12 @@ class PrometheusWrapper:
             self.next_location_to_update = 0
 
     def _prune_speedtests_locked(self):
-        LOGGER.info('pruning speedtests')
-        cutoff = time.time() - 30 * 24 * 3600
-        to_delete = [k for (k, v) in self.node_speedtests.items() if datetime.fromisoformat(v['startedAt'].replace('Z', '+00:00')).timestamp() < cutoff]
-        for stid in to_delete:
-            del self.node_speedtests[stid]
+        new_speedtests = {}
         for node in self.id2node_map.values():
             st = node.get('speedTest')
             if st:
-                stid = f"{node['id']}-{st['startedAt']}"
-                self.node_speedtests[stid] = dict(st, id=stid, nodeid=node['id'], nlid=node['nlid'])
-        LOGGER.info(f'pruning/adding complete; {len(self.node_speedtests)} speedtests remaining')
-
+                new_speedtests[node['id']] = dict(st, id=node['id'], nlid=node['nlid'])
+        self.node_speedtests = new_speedtests
 
 def main(args):
     import argparse
